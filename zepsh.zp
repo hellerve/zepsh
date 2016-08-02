@@ -1,0 +1,193 @@
+; A small dumb shell for zepto in zepto
+(load "readline")
+(import-all "readline" "rl")
+
+(define *prompt* "zepto> ")
+(define *prompt2* ">>> ")
+(define *input-highlight* :reset)
+(define *output-highlight* :reset)
+(define *ret* "=> ")
+(define *statement-count* 1)
+(define *local-conf* "./.zepshrc")
+(define *conf* (++ (get-home-dir) "/.zepshrc"))
+(define *histfile* (++ (get-home-dir) "/.zepsh_history"))
+(define *env* *global-env*)
+(define *record* #{:record? #f :file #f})
+
+(define (write-plain arg)
+  (begin
+    (color :reset)
+    (write arg)))
+
+(define (error-plain . args)
+  (begin
+    (color :reset)
+    (apply error args)))
+
+(define (do-exit . args)
+  (begin
+    (write-plain "Moriturus te saluto!")
+    (if (*record* :record?) (close-output-file (*record* :file)))
+    (exit (if (null? args) 0 (string->number (car args))))))
+
+(define (show-commands . args)
+  (begin
+    (map (lambda (x) (write-plain (++ (car x) ": " (->string (cadr x)))))
+         (zepto:get-bindings (if (null? args) "" (car args)) *env*))
+    (repl)))
+
+(define (set-prompt . args)
+  (if (not (null? args))
+    (begin
+     (set! *prompt* (string:join args))
+     (repl))
+    (begin
+      (error-plain "option :p requires an argument (e.g. ':p=new-prompt>')")
+      (repl))))
+
+(define (show-license . args)
+  (begin
+    (write-plain (read-contents (++ (zepto:home)
+                                    "assets/license_interactive.as")))
+    (repl)))
+
+(define (show-complete-license . args)
+  (begin
+    (write-plain (read-contents (++ (zepto:home)
+                                    "assets/complete_license.as")))
+    (repl)))
+
+(define (record . args)
+  (if (not (null? args))
+    (begin
+     (set! *record* (make-hash :record? #t
+                               :file    (open-output-file (car args))))
+     (write-plain (++ "Recording session to " (car args)))
+     (repl))
+    (begin
+      (error-plain "option :record-to requires an argument (e.g. ':record-to=output')")
+      (repl))))
+
+(define (stop-record . args)
+  (if (*record* :record?)
+    (begin
+      (close-output-file (*record* :file))
+      (set! *record* #{:record? #f :file #f})
+      (repl))
+    (begin
+      (error-plain "recording not active")
+      (repl))))
+
+(define (get-ddate . args)
+  (begin
+    (load "datetime/datetime")
+    (write (++ "It's " ((import "datetime:ddate-from-timestamp") (car (unix-timestamp)))))
+    (repl)))
+
+(define meta-commands
+  (make-hash
+    ":q" do-exit
+    ":record-to" record
+    ":stop-recording" stop-record
+    ":quit" do-exit
+    ":p" set-prompt
+    ":license" show-license
+    ":ddate" get-ddate
+    ":complete-license" show-complete-license
+    ":help" show-commands
+    ":prompt" set-prompt))
+
+(define (write-hist-item item)
+  "Unbuffered writing, just to make sure nothing's lost"
+  (let* ((cont (read-contents *histfile*))
+         (hist-to (open-output-file *histfile*)))
+    (begin
+      (rl:add-history item)
+      (write (substring cont 0 (sub1 (length cont))) hist-to)
+      (write item hist-to)
+      (close-output-file hist-to))))
+
+(define (string:parseable? str)
+  (not (in? (->string (catch-vm-error `(string:parse ,str)))
+            "Parse error at")))
+
+(define (enrich input str)
+  (let loop ((split (string:split str #\newline)))
+    (if (in? (car split) "Parse error at")
+      (let ((col (string->number (car (string:split (cadr (string:split (car split)
+                                                                        "column "))
+                                                    #\))))))
+        (++ (car split) "\n"
+            input "\n"
+            (string:replicate (sub1 col) " ") "^\n"
+            (string:join (cdr split) #\newline)))
+      (loop (cdr split)))))
+
+(define (run-cmd cmd args)
+  (let ((caught (catch-vm-error `(system ,cmd (quote ,args)))))
+    (if (in? caught "readCreateProcessWithExitCode")
+      (++ "error: command not found: " cmd)
+      (let ((out (string:trim (cadr caught))))
+        (if (truthy? out) out (caddr caught))))))
+
+(define (repl . env)
+  (define (check acc)
+    (define (get-secondary)
+      (rl:readline (++ *prompt2* (color *input-highlight* #{:to-str #t}))))
+    (if (string:parseable? acc)
+      (make-hash :output (catch-vm-error (macro-expand (string:parse acc))
+                                                       *env*)
+                 :input acc)
+      (if (> (string:count acc #\() (string:count acc #\)))
+        (check (++ acc " " (get-secondary)))
+        (make-hash :output (enrich acc
+                                   (->string
+                                    (catch-vm-error
+                                      `(string:parse ,acc))))
+                   :input acc))))
+  (begin
+    (if (truthy? env) (set! *env* (car env)))
+    (define input (rl:readline (++ (if (function? *prompt*) (*prompt*) *prompt*)
+                                   (color *input-highlight* #{:to-str #t}))))
+    (color :reset)
+    (if (falsy? input)
+      (repl))
+    (set! *statement-count* (add1 *statement-count*))
+    (if (not (in? [#\: #\(] (car input)))
+      (begin
+        (let* ((cmd (string:split input #\space))
+               (output (run-cmd (car cmd) (cdr cmd))))
+          (write output))
+        (write-hist-item input)
+        (repl)))
+    (define checked (check input))
+    (write-hist-item (checked :input))
+    (define res (->string (checked :output)))
+    (let* ((split (string:split res #\=))
+           (cmd   (car split)))
+      (if (not (nil? (meta-commands cmd)))
+        (apply (meta-commands cmd) (cdr split))
+        (begin
+          (display (if (function? *ret*) (*ret*) *ret*))
+          (color *output-highlight*)
+          (write res)
+          (rl:reset-completions (hash:keys (env->hashmap *env*)))
+          (if (*record* :record?)
+            (begin
+              (display input (*record* :file))
+              (display " ; " (*record* :file))
+              (write res (*record* :file))))
+          (repl))))))
+
+(if (not (eq? (open-input-file *local-conf*) #f))
+  (load *local-conf*))
+
+(if (not (eq? (open-input-file *conf*) #f))
+  (load *conf*))
+
+(with-input-file *histfile (lambda (file)
+  (if (not (eq? file #f))
+    (map rl:add-history (reverse (string:split (read-contents *histfile*)
+                                               #\newline))))))
+
+(repl)
