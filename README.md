@@ -1,6 +1,6 @@
 # zepsh
 
-The *zep*to *sh*ell. Basically a normal zepto shell that sends
+The *zep*to *sh*ell. BasiREPL that sends
 any command that is not a meta command or is surrounded by parentheses
 to the system shell.
 
