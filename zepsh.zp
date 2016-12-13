@@ -9,8 +9,8 @@
 (define *ret* "=> ")
 (define *statement-count* 1)
 (define *local-conf* "./.zepshrc")
-(define *conf* (++ (get-home-dir) "/.zepshrc"))
-(define *histfile* (++ (get-home-dir) "/.zepsh_history"))
+(define *conf* (++ (os:get-home-dir) "/.zepshrc"))
+(define *histfile* (++ (os:get-home-dir) "/.zepsh_history"))
 (define *env* *global-env*)
 (define *record* #{:record? #f :file #f})
 
@@ -185,9 +185,12 @@
 (if (not (eq? (open-input-file *conf*) #f))
   (load *conf*))
 
-(with-input-file *histfile (lambda (file)
-  (if (not (eq? file #f))
-    (map rl:add-history (reverse (string:split (read-contents *histfile*)
-                                               #\newline))))))
+
+(let ((file (open-input-file *histfile*)))
+  (if (eq? file #f)
+    (system "touch" (list *histfile*))
+    (begin
+      (rl:set-history! (reverse (string:split (read-contents *histfile*) #\newline)))
+      (close-input-file file))))
 
 (repl)

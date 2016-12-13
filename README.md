@@ -1,8 +1,7 @@
 # zepsh
 
-The *zep*to *sh*ell. BasiREPL that sends
-any command that is not a meta command or is surrounded by parentheses
-to the system shell.
+The *zep*to *sh*ell. Basically a REPL that sends any command that is
+not a meta command or is surrounded by parentheses to the system shell.
 
 The config file is `.zepshrc`. Both the version in the home directory
 and the current directory will be read, where the current directory
